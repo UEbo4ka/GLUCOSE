@@ -69,6 +69,9 @@ public:
 		return TagToCountMap.Contains(Tag);
 	}
 
+	// Returns the number of elements in the TagToCountMap
+	int32 GetTagCount() const { return TagToCountMap.Num(); }
+
 	//~FFastArraySerializer contract
 	void PreReplicatedRemove(const TArrayView<int32> RemovedIndices, int32 FinalSize);
 	void PostReplicatedAdd(const TArrayView<int32> AddedIndices, int32 FinalSize);

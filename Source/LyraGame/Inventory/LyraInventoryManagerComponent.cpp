@@ -43,6 +43,16 @@ void FLyraInventoryList::PreReplicatedRemove(const TArrayView<int32> RemovedIndi
 	for (int32 Index : RemovedIndices)
 	{
 		FLyraInventoryEntry& Stack = Entries[Index];
+		if (Stack.Instance && Stack.Instance->GetItemDef())
+		{
+			// Removing a link from a complex structure
+			TArray<FLyraInventoryEntry*>& EntriesForDef = ItemDefToEntries.FindOrAdd(Stack.Instance->GetItemDef());
+			EntriesForDef.Remove(&Entries[Index]);
+			if (EntriesForDef.Num() == 0)
+			{
+				ItemDefToEntries.Remove(Stack.Instance->GetItemDef());
+			}
+		}
 		BroadcastChangeMessage(Stack, /*OldCount=*/ Stack.StackCount, /*NewCount=*/ 0);
 		Stack.LastObservedCount = 0;
 	}
@@ -53,6 +63,12 @@ void FLyraInventoryList::PostReplicatedAdd(const TArrayView<int32> AddedIndices,
 	for (int32 Index : AddedIndices)
 	{
 		FLyraInventoryEntry& Stack = Entries[Index];
+        if (Stack.Instance && Stack.Instance->GetItemDef())
+		{
+			// Adding a link to the accelerating structure
+			TArray<FLyraInventoryEntry*>& EntriesForDef = ItemDefToEntries.FindOrAdd(Stack.Instance->GetItemDef());
+			EntriesForDef.Add(&Stack);
+		}
 		BroadcastChangeMessage(Stack, /*OldCount=*/ 0, /*NewCount=*/ Stack.StackCount);
 		Stack.LastObservedCount = Stack.StackCount;
 	}
@@ -64,7 +80,7 @@ void FLyraInventoryList::PostReplicatedChange(const TArrayView<int32> ChangedInd
 	{
 		FLyraInventoryEntry& Stack = Entries[Index];
 		check(Stack.LastObservedCount != INDEX_NONE);
-		BroadcastChangeMessage(Stack, /*OldCount=*/ Stack.LastObservedCount, /*NewCount=*/ Stack.StackCount);
+        BroadcastChangeMessage(Stack, /*OldCount=*/ Stack.LastObservedCount, /*NewCount=*/ Stack.StackCount);
 		Stack.LastObservedCount = Stack.StackCount;
 	}
 }
@@ -170,6 +186,33 @@ TArray<ULyraInventoryItemInstance*> FLyraInventoryList::GetAllItems() const
     return TArray<ULyraInventoryItemInstance*>();
 }
 
+ULyraInventoryItemInstance* FLyraInventoryList::FindFirstItemStackByDefinition(TSubclassOf<ULyraInventoryItemDefinition> ItemDef) const
+{
+	// Using an accelerating structure for fast search
+	if (const TArray<FLyraInventoryEntry*>* FoundEntries = ItemDefToEntries.Find(ItemDef))
+	{
+		if (FoundEntries->Num() > 0)
+		{
+			return (*FoundEntries)[0]->Instance;
+		}
+	}
+	return nullptr;
+}
+
+int32 FLyraInventoryList::GetTotalItemCountByDefinition(TSubclassOf<ULyraInventoryItemDefinition> ItemDef) const
+{
+	int32 TotalCount = 0;
+	// Using an accelerating structure for fast search
+	if (const TArray<FLyraInventoryEntry*>* FoundEntries = ItemDefToEntries.Find(ItemDef))
+	{
+		for (const FLyraInventoryEntry* Entry : *FoundEntries)
+		{
+			TotalCount += Entry->StackCount;
+		}
+	}
+	return TotalCount;
+}
+
 //////////////////////////////////////////////////////////////////////
 // ULyraInventoryManagerComponent
 
@@ -189,7 +232,7 @@ void ULyraInventoryManagerComponent::GetLifetimeReplicatedProps(TArray< FLifetim
 
 bool ULyraInventoryManagerComponent::CanAddItemDefinition(TSubclassOf<ULyraInventoryItemDefinition> ItemDef, int32 StackCount)
 {
-	return GetMaxItemsCanAdd(ItemDef, StackCount) == StackCount;
+	return GetMaxItemsCanAdd(ItemDef, StackCount) > 0;
 }
 
 ULyraInventoryItemInstance* ULyraInventoryManagerComponent::AddItemDefinition(TSubclassOf<ULyraInventoryItemDefinition> ItemDef, int32 StackCount)
@@ -305,39 +348,12 @@ TArray<ULyraInventoryItemInstance*> ULyraInventoryManagerComponent::GetFilteredI
 
 ULyraInventoryItemInstance* ULyraInventoryManagerComponent::FindFirstItemStackByDefinition(TSubclassOf<ULyraInventoryItemDefinition> ItemDef) const
 {
-	for (const FLyraInventoryEntry& Entry : InventoryList.Entries)
-	{
-		ULyraInventoryItemInstance* Instance = Entry.Instance;
-
-		if (IsValid(Instance))
-		{
-			if (Instance->GetItemDef() == ItemDef)
-			{
-				return Instance;
-			}
-		}
-	}
-
-	return nullptr;
+	return InventoryList.FindFirstItemStackByDefinition(ItemDef);
 }
 
 int32 ULyraInventoryManagerComponent::GetTotalItemCountByDefinition(TSubclassOf<ULyraInventoryItemDefinition> ItemDef) const
 {
-	int32 TotalCount = 0;
-	for (const FLyraInventoryEntry& Entry : InventoryList.Entries)
-	{
-		ULyraInventoryItemInstance* Instance = Entry.Instance;
-
-		if (IsValid(Instance))
-		{
-			if (Instance->GetItemDef() == ItemDef)
-			{
-				++TotalCount;
-			}
-		}
-	}
-
-	return TotalCount;
+	return InventoryList.GetTotalItemCountByDefinition(ItemDef);
 }
 
 bool ULyraInventoryManagerComponent::ConsumeItemsByDefinition(TSubclassOf<ULyraInventoryItemDefinition> ItemDef, int32 NumToConsume)
@@ -352,7 +368,7 @@ bool ULyraInventoryManagerComponent::ConsumeItemsByDefinition(TSubclassOf<ULyraI
 	int32 TotalConsumed = 0;
 	while (TotalConsumed < NumToConsume)
 	{
-		if (ULyraInventoryItemInstance* Instance = ULyraInventoryManagerComponent::FindFirstItemStackByDefinition(ItemDef))
+		if (ULyraInventoryItemInstance* Instance = FindFirstItemStackByDefinition(ItemDef))
 		{
 			InventoryList.RemoveEntry(Instance);
 			++TotalConsumed;
@@ -488,5 +504,3 @@ float ULyraInventoryManagerComponent::GetCurrentTotalWeight() const
     }
     return TotalWeight;
 }
-
-

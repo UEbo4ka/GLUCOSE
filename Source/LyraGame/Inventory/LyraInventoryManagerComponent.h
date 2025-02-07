@@ -98,6 +98,10 @@ public:
 
 	void RemoveEntry(ULyraInventoryItemInstance* Instance);
 
+	ULyraInventoryItemInstance* FindFirstItemStackByDefinition(TSubclassOf<ULyraInventoryItemDefinition> ItemDef) const;
+	
+	int32 GetTotalItemCountByDefinition(TSubclassOf<ULyraInventoryItemDefinition> ItemDef) const;
+
 private:
 	void BroadcastChangeMessage(FLyraInventoryEntry& Entry, int32 OldCount, int32 NewCount);
 
@@ -109,6 +113,9 @@ private:
 	UPROPERTY()
 	TArray<FLyraInventoryEntry> Entries;
 
+	// Accelerating structure for quickly finding objects by their definition
+	TMap<TSubclassOf<ULyraInventoryItemDefinition>, TArray<FLyraInventoryEntry*>> ItemDefToEntries;
+
 	UPROPERTY(NotReplicated)
 	TObjectPtr<UActorComponent> OwnerComponent;
 };
@@ -118,15 +125,6 @@ struct TStructOpsTypeTraits<FLyraInventoryList> : public TStructOpsTypeTraitsBas
 {
 	enum { WithNetDeltaSerializer = true };
 };
-
-
-
-
-
-
-
-
-
 
 /**
  * Manages an inventory
